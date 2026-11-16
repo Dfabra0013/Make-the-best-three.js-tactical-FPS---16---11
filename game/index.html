@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SALTWORKS — a round-based tactical FPS</title>
+<link rel="icon" href="data:,">
+<style>
+  /* LOOK: a storm-lit salt refinery. Six values, one accent, no gradients that are not light. */
+  :root {
+    --night: #0d1114;
+    --slate: #171d21;
+    --steel: #2b343a;
+    --chalk: #e7e2d6;
+    --ash: #93a0a6;
+    --accent: #f0a03c;
+    --tideline: #2f7f94;
+    --rust: #a8482c;
+    --font-ui: "Inter", "Segoe UI", system-ui, sans-serif;
+    --font-readout: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--night); color: var(--chalk);
+    font-family: var(--font-ui); -webkit-user-select: none; user-select: none; }
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+
+  /* --- crosshair: four ticks that open with the live cone of fire --- */
+  #reticle { position: absolute; left: 50%; top: 50%; width: 78px; height: 78px; transform: translate(-50%, -50%); }
+  #reticle i { position: absolute; background: var(--chalk); box-shadow: 0 0 3px #000; }
+  #reticle i.ud { left: 38px; width: 2px; height: 9px; }
+  #reticle i.lr { top: 38px; height: 2px; width: 9px; }
+  #reticle b { position: absolute; left: 38px; top: 38px; width: 2px; height: 2px; background: var(--chalk); opacity: .8; }
+
+  /* --- hit marker: four diagonal ticks that flash on a confirmed hit, red on a kill --- */
+  #hit { position: absolute; left: 50%; top: 50%; width: 30px; height: 30px; transform: translate(-50%, -50%);
+    opacity: 0; transition: opacity .12s linear; }
+  #hit.on { opacity: 1; transition: none; }
+  #hit i { position: absolute; width: 9px; height: 2px; background: var(--chalk); }
+  #hit.kill i { background: var(--rust); }
+  #hit i:nth-child(1) { left: 3px; top: 7px; transform: rotate(45deg); }
+  #hit i:nth-child(2) { right: 3px; top: 7px; transform: rotate(-45deg); }
+  #hit i:nth-child(3) { left: 3px; bottom: 7px; transform: rotate(-45deg); }
+  #hit i:nth-child(4) { right: 3px; bottom: 7px; transform: rotate(45deg); }
+
+  #vignette { position: absolute; inset: 0; opacity: 0; transition: opacity .25s ease-out;
+    background: radial-gradient(ellipse at center, rgba(168,72,44,0) 38%, rgba(168,72,44,.62) 100%); }
+
+  .panel { position: absolute; background: color-mix(in srgb, var(--slate) 86%, transparent);
+    border: 1px solid var(--steel); border-radius: 3px; padding: 8px 12px;
+    backdrop-filter: blur(2px); }
+  .label { font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--ash); }
+
+  /* --- bottom left: vitals, armour, and the round money --- */
+  #vitals { left: 22px; bottom: 22px; display: flex; align-items: flex-end; gap: 18px; padding: 10px 16px; }
+  #vitals .num { font-family: var(--font-readout); font-size: 30px; line-height: 1; }
+  #vitals .hp .num { color: var(--chalk); }
+  #vitals .hp.low .num { color: var(--rust); }
+  #vitals .ap .num { font-size: 19px; color: var(--tideline); }
+  #money { left: 22px; bottom: 96px; font-family: var(--font-readout); font-size: 15px; color: var(--accent); }
+
+  /* --- bottom right: weapon, magazine, reserve --- */
+  #arms { right: 22px; bottom: 22px; text-align: right; padding: 10px 16px; }
+  #arms .name { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--ash); }
+  #arms .round { font-family: var(--font-readout); font-size: 30px; line-height: 1.05; }
+  #arms .round small { font-size: 15px; color: var(--ash); }
+  #arms.low .round { color: var(--rust); }
+  #gear { right: 22px; bottom: 100px; text-align: right; font-size: 11px; color: var(--ash); line-height: 1.5; }
+  #gear b { color: var(--chalk); font-weight: 500; }
+
+  /* --- top centre: the round clock, the score, the objective --- */
+  #clock { left: 50%; top: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px;
+    padding: 6px 14px; }
+  #clock .score { font-family: var(--font-readout); font-size: 22px; min-width: 20px; text-align: center; }
+  #clock .score.raid { color: var(--accent); }
+  #clock .score.watch { color: var(--tideline); }
+  #clock .time { font-family: var(--font-readout); font-size: 26px; min-width: 74px; text-align: center; }
+  #clock .time.urgent { color: var(--rust); }
+  #round { left: 50%; top: 70px; transform: translateX(-50%); text-align: center; min-width: 190px; }
+
+  /* --- the plant bar, shown while a charge is being set --- */
+  #plant { left: 50%; bottom: 140px; transform: translateX(-50%); width: 260px; display: none; }
+  #plant .bar { height: 6px; background: var(--steel); margin-top: 6px; }
+  #plant .bar i { display: block; height: 100%; width: 0; background: var(--accent); }
+
+  /* --- kill feed, top right --- */
+  #feed { position: absolute; right: 22px; top: 18px; display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
+  #feed div { font-size: 12px; background: color-mix(in srgb, var(--slate) 80%, transparent); padding: 3px 9px;
+    border-left: 2px solid var(--steel); color: var(--ash); }
+  #feed div b { color: var(--chalk); font-weight: 500; }
+  #feed div.mine { border-left-color: var(--accent); }
+
+  /* --- centre announcements: round won, lost, planted, defused --- */
+  #banner { position: absolute; left: 0; right: 0; top: 30%; text-align: center; opacity: 0; transition: opacity .3s; }
+  #banner.on { opacity: 1; }
+  #banner .big { font-size: 44px; letter-spacing: .12em; text-transform: uppercase; text-shadow: 0 2px 18px #000; }
+  #banner .sub { margin-top: 6px; font-size: 14px; color: var(--ash); letter-spacing: .06em; }
+  #banner.win .big { color: var(--accent); }
+  #banner.loss .big { color: var(--rust); }
+
+  #radar { position: absolute; right: 22px; top: 130px; width: 148px; height: 148px; }
+  #radar canvas { width: 100%; height: 100%; }
+
+  #whiteout { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+
+  /* --- the opening brief --- */
+  #splash { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at 50% 40%, rgba(29,40,48,0.86), rgba(9,12,14,0.97)); z-index: 30; }
+  #splash .brief { width: min(860px, 92vw); padding: 34px 40px 26px; border: 1px solid var(--steel);
+    background: color-mix(in srgb, var(--slate) 92%, transparent); border-radius: 4px; }
+  #splash .kicker { font-size: 11px; letter-spacing: .24em; text-transform: uppercase; color: var(--ash); }
+  #splash h1 { margin: 4px 0 0; font-size: 58px; letter-spacing: .16em; font-weight: 600; color: var(--chalk); }
+  #splash .sub { color: var(--accent); font-size: 13px; letter-spacing: .12em; margin-top: 2px; }
+  #splash .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin: 22px 0 20px; }
+  #splash h2 { font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--tideline);
+    margin: 14px 0 4px; font-weight: 600; }
+  #splash p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--ash); }
+  #splash p b { color: var(--chalk); font-weight: 500; }
+  #splash button { margin-top: 6px; padding: 12px 26px; font: inherit; font-size: 13px; letter-spacing: .2em;
+    background: var(--accent); color: #171d21; border: 0; border-radius: 3px; cursor: pointer; font-weight: 700; }
+  #splash button:hover { background: #ffb75e; }
+  #splash .foot { margin-top: 12px; font-size: 11px; color: var(--steel); letter-spacing: .1em; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.min.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="stage"></div>
+<div id="hud">
+  <div id="vignette"></div>
+  <div id="reticle"><i class="ud" style="top:0"></i><i class="ud" style="bottom:0"></i><i class="lr" style="left:0"></i><i class="lr" style="right:0"></i><b></b></div>
+  <div id="hit"><i></i><i></i><i></i><i></i></div>
+
+  <div id="clock" class="panel">
+    <div class="score raid" id="score-raid">0</div>
+    <div class="time" id="round-time">1:35</div>
+    <div class="score watch" id="score-watch">0</div>
+  </div>
+  <div id="round" class="panel">
+    <div class="label" id="round-label">Round 1 · buy phase</div>
+    <div class="label" id="objective" style="color:var(--accent);margin-top:2px">Set charges at either reliquary</div>
+  </div>
+
+  <div id="money" class="panel">$0</div>
+  <div id="vitals" class="panel">
+    <div class="hp"><div class="label">health</div><div class="num" id="hp">100</div></div>
+    <div class="ap"><div class="label">plate</div><div class="num" id="ap">0</div></div>
+  </div>
+  <div id="gear"></div>
+  <div id="arms" class="panel">
+    <div class="name" id="gun-name">Vesper M4</div>
+    <div class="round"><span id="mag">30</span><small> / <span id="reserve">90</span></small></div>
+  </div>
+
+  <div id="plant" class="panel"><div class="label">Setting the charge</div><div class="bar"><i id="plant-fill"></i></div></div>
+  <div id="feed"></div>
+  <div id="banner"><div class="big" id="banner-big"></div><div class="sub" id="banner-sub"></div></div>
+  <div id="radar"><canvas id="radar-cv"></canvas></div>
+  <div id="whiteout"></div>
+</div>
+
+<div id="splash">
+  <div class="brief">
+    <div class="kicker">make.fun · round-based tactical FPS</div>
+    <h1>SALTWORKS</h1>
+    <div class="sub">The Brine Works · first to four rounds · 3 v 3</div>
+    <div class="cols">
+      <div>
+        <h2>Move</h2>
+        <p><b>WASD</b> walk · <b>Shift</b> sprint · <b>Ctrl</b> crouch · <b>Space</b> jump · <b>Mouse</b> look</p>
+        <h2>Fight</h2>
+        <p><b>Left mouse</b> fire · <b>Right mouse</b> scope (Longspar) · <b>R</b> reload · <b>G</b> shard · <b>H</b> haze · <b>F</b> flare</p>
+        <h2>The round</h2>
+        <p><b>E</b> plant or cut the charge · <b>B</b> buy · attackers set a charge at either reliquary; defenders hold both</p>
+      </div>
+      <div>
+        <h2>Accuracy counts</h2>
+        <p>Your cone opens when you move and closes when you stop and crouch. The first round of a burst goes where you point it. Aim, then fire — running and gunning loses the duel.</p>
+        <h2>Money matters</h2>
+        <p>You start with $800 and are paid every round. A loss pays more the more you lose in a row. Buy a rifle, a plate, and a throw.</p>
+        <h2>Three lanes</h2>
+        <p>The Long Pan in the west, the Evaporator hall through the middle, the Weigh House in the east. Pick a lane, take a corner, watch your back.</p>
+      </div>
+    </div>
+    <button id="start">ENTER THE WORKS</button>
+    <div class="foot">Click to lock the mouse · Escape frees it</div>
+  </div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
