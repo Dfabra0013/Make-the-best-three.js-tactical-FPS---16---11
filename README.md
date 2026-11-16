@@ -26,6 +26,12 @@ are original to this game.
   lamp-lit landmarks, drifting steam, and an original palette of slate, chalk and one warm
   accent.
 
+## Presentation and verification
+
+See [PRESENTATION.md](PRESENTATION.md) for the demo sequence, export instructions and
+remaining remote-submission actions. Run `node scripts/preflight.ts` to verify a fresh
+local handoff. Remote acceptance and judging results are not guaranteed.
+
 ## Run it
 
 ```sh
